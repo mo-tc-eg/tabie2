@@ -950,11 +950,7 @@ const firebaseConfig = {
     appId: "1:356449051334:web:0373245426e3b4cb3e6dc7"
 };
 
-const GEMINI_API_KEYS = [
-    "AIzaSyCpLnXNX-TdBtt_0yVAh7vMMRJRjBtr7gQ",
-    "AQ.Ab8RN6Jz5OqDp9sbAIxptYniBtrvi21xLl0EpfRQENcrXIRyOA",
-    "AQ.Ab8RN6IReTo194FV2QXtk82RtsQcnScKC4hbrxvri9iwqsII3g"
-];
+const GEMINI_API_KEY = "AIzaSyCpLnXNX-TdBtt_0yVAh7vMMRJRjBtr7gQ";
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
 
 const app = initializeApp(firebaseConfig);
@@ -1433,33 +1429,24 @@ async function submitExam() {
 
 async function correctExamWithGemini(questions, answerKey, studentAnswers) {
     const prompt = buildCorrectionPrompt(questions, answerKey, studentAnswers);
-    let lastError = null;
-    for (const key of GEMINI_API_KEYS) {
-        try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{ role: "user", parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0, responseMimeType: "application/json" }
-                })
-            });
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`API key failed: ${response.status} ${errText}`);
-            }
-            const data = await response.json();
-            const rawText = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
-            const cleaned = rawText.replace(/```json|```/g, "").trim();
-            const parsed = JSON.parse(cleaned);
-            return parsed;
-        } catch (err) {
-            lastError = err;
-            continue;
-        }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0, responseMimeType: "application/json" }
+        })
+    });
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API key failed: ${response.status} ${errText}`);
     }
-    throw new Error("فشل جميع مفاتيح API: " + lastError?.message);
+    const data = await response.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+    const cleaned = rawText.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return parsed;
 }
 
 function buildCorrectionPrompt(questions, answerKey, studentAnswers) {
