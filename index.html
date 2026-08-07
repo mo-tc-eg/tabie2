@@ -884,7 +884,6 @@ main {
 
 </div>
 
-<!-- Modals -->
 <div class="modal-overlay" id="messageModalOverlay">
     <div class="modal-sheet" style="max-width:400px;">
         <div class="modal-body" style="padding-top:28px;">
@@ -950,9 +949,12 @@ const firebaseConfig = {
     messagingSenderId: "356449051334",
     appId: "1:356449051334:web:0373245426e3b4cb3e6dc7"
 };
-const GEMINI_API_KEY = "AQ.Ab8RN6IReTo194FV2QXtk82RtsQcnScKC4hbrxvri9iwqsII3g";
+
+const GEMINI_API_KEYS = [
+    "AIzaSyCpLnXNX-TdBtt_0yVAh7vMMRJRjBtr7gQ",
+    "AQ.Ab8RN6IReTo194FV2QXtk82RtsQcnScKC4hbrxvri9iwqsII3g"
+];
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -992,7 +994,8 @@ const state = {
     timeRemaining: 0,
     totalSeconds: 0,
     isSubmitted: false,
-    resultData: null
+    resultData: null,
+    examsBySubject: {}
 };
 
 function showMessageModal(message, type = "info") {
@@ -1148,6 +1151,17 @@ function listenSubjects() {
             renderSubjects();
         }
     });
+
+    onSnapshot(examsCol, (snap) => {
+        const counts = {};
+        snap.docs.forEach(d => {
+            const data = d.data();
+            const sid = data.subjectId;
+            if (sid) counts[sid] = (counts[sid] || 0) + 1;
+        });
+        state.examsBySubject = counts;
+        if (!state.currentSubjectId) renderSubjects();
+    });
 }
 
 function renderSubjects() {
@@ -1162,7 +1176,7 @@ function renderSubjects() {
         return;
     }
     subjectsGrid.innerHTML = state.subjects.map((subject) => {
-        const count = state.examsBySubject?.[subject.id] ?? 0;
+        const count = state.examsBySubject[subject.id] || 0;
         return `
         <div class="folder-card" data-id="${subject.id}" data-name="${escapeHtml(subject.name)}">
           <div class="folder-top">
@@ -1185,18 +1199,16 @@ subjectsGrid.addEventListener("click", (e) => {
 });
 
 function listenExams(subjectId) {
-    // استخدام استعلام بسيط بدون orderBy لتجنب الحاجة إلى فهرس مركب
     const q = query(examsCol, where("subjectId", "==", subjectId));
     onSnapshot(q, (snap) => {
         let exams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // ترتيب يدوي حسب createdAt (تنازلي)
         exams.sort((a, b) => {
             const aTime = a.createdAt?.toMillis?.() || 0;
             const bTime = b.createdAt?.toMillis?.() || 0;
             return bTime - aTime;
         });
         state.exams = exams;
-        state.examsBySubject = { [subjectId]: exams.length };
+        state.examsBySubject[subjectId] = exams.length;
         if (!state.currentSubjectId || state.currentSubjectId !== subjectId) return;
         renderExams(exams);
     }, (error) => {
@@ -1218,7 +1230,9 @@ function renderExams(exams) {
     }
     examsGrid.innerHTML = exams.map((exam) => {
         const status = getExamStatus(exam);
-        const canStart = status === "available";
+        let canStart = status === "available";
+        const doneKey = `exam_${exam.id}_done`;
+        if (localStorage.getItem(doneKey) === "true") canStart = false;
         return `
         <div class="exam-card" data-id="${exam.id}">
           <div class="exam-card-head">
@@ -1232,7 +1246,7 @@ function renderExams(exams) {
           </div>
           <div class="exam-card-actions">
             <button class="btn-start" data-action="start" data-id="${exam.id}" ${!canStart ? 'disabled' : ''}>
-              <span class="material-icons-round">play_arrow</span>${canStart ? 'ابدأ الامتحان' : 'غير متاح'}
+              <span class="material-icons-round">play_arrow</span>${canStart ? 'ابدأ الامتحان' : (localStorage.getItem(`exam_${exam.id}_done`) === "true" ? 'تم الأداء' : 'غير متاح')}
             </button>
           </div>
         </div>`;
@@ -1247,6 +1261,11 @@ examsGrid.addEventListener("click", (e) => {
     if (!exam) return;
     if (getExamStatus(exam) !== "available") {
         showMessageModal("هذا الامتحان غير متاح حالياً.", "error");
+        return;
+    }
+    const doneKey = `exam_${id}_done`;
+    if (localStorage.getItem(doneKey) === "true") {
+        showMessageModal("لقد أديت هذا الامتحان بالفعل، لا يمكنك إعادة فتحه.", "error");
         return;
     }
     el("studentNameInput").value = "";
@@ -1363,7 +1382,27 @@ async function submitExam() {
         const questions = exam.structuredExam?.questions || [];
         const answerKey = exam.answerKey || "";
         const studentAnswers = state.answers;
-        const result = await correctExamWithGemini(questions, answerKey, studentAnswers);
+
+        const allEmpty = studentAnswers.every(a => !a || a.trim() === "");
+        let result;
+        if (allEmpty) {
+            const total = questions.length || 1;
+            result = {
+                score: 0,
+                perQuestionScores: questions.map(() => 0),
+                feedback: "لم يتم تقديم أي إجابة.",
+                details: questions.map((q, i) => ({
+                    question: i+1,
+                    correct: answerKey ? "نموذج الإجابة متاح" : "—",
+                    student: "—",
+                    mistake: "لم يجب الطالب",
+                    feedback: "لم يتم إدخال إجابة."
+                }))
+            };
+        } else {
+            result = await correctExamWithGemini(questions, answerKey, studentAnswers);
+        }
+
         const resultData = {
             examId: exam.id,
             examTitle: exam.title,
@@ -1379,6 +1418,8 @@ async function submitExam() {
         };
         const docRef = await addDoc(resultsCol, resultData);
         resultData.id = docRef.id;
+        const doneKey = `exam_${exam.id}_done`;
+        localStorage.setItem(doneKey, "true");
         setLoading(false);
         switchToResult(resultData);
     } catch (err) {
@@ -1391,24 +1432,33 @@ async function submitExam() {
 
 async function correctExamWithGemini(questions, answerKey, studentAnswers) {
     const prompt = buildCorrectionPrompt(questions, answerKey, studentAnswers);
-    try {
-        const response = await fetch(GEMINI_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ role: "user", parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0, responseMimeType: "application/json" }
-            })
-        });
-        if (!response.ok) throw new Error("فشل الاتصال بـ Gemini");
-        const data = await response.json();
-        const rawText = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
-        const cleaned = rawText.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return parsed;
-    } catch (err) {
-        throw new Error("فشل في تصحيح الامتحان: " + err.message);
+    let lastError = null;
+    for (const key of GEMINI_API_KEYS) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{ role: "user", parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0, responseMimeType: "application/json" }
+                })
+            });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`API key failed: ${response.status} ${errText}`);
+            }
+            const data = await response.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+            const cleaned = rawText.replace(/```json|```/g, "").trim();
+            const parsed = JSON.parse(cleaned);
+            return parsed;
+        } catch (err) {
+            lastError = err;
+            continue;
+        }
     }
+    throw new Error("فشل جميع مفاتيح API: " + lastError?.message);
 }
 
 function buildCorrectionPrompt(questions, answerKey, studentAnswers) {
