@@ -942,7 +942,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyCSG6BPDaD-jrPYlUAHkOFfSnYKW0AmkuE",
+    apiKey: "AQ.Ab8RN6I26pzcR3OCcpjX96NaPO5CLaEWYto3S3ROU6FCjkoS6Q",
     authDomain: "tabie-eff44.firebaseapp.com",
     projectId: "tabie-eff44",
     storageBucket: "tabie-eff44.firebasestorage.app",
@@ -950,8 +950,8 @@ const firebaseConfig = {
     appId: "1:356449051334:web:0373245426e3b4cb3e6dc7"
 };
 
-const GEMINI_API_KEY = "AIzaSyCpLnXNX-TdBtt_0yVAh7vMMRJRjBtr7gQ";
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_API_KEY = "AQ.Ab8RN6JZLYFIe1MEEKsuzHCyuD9lrQpuBKtYboF9H3trlCdujw";
+const GEMINI_MODEL = "gemini-3.6-flash";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -1435,12 +1435,12 @@ async function correctExamWithGemini(questions, answerKey, studentAnswers) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0, responseMimeType: "application/json" }
+            generationConfig: { temperature: 0 }
         })
     });
     if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`API key failed: ${response.status} ${errText}`);
+        throw new Error(`فشل الاتصال بـ Gemini (${response.status}): ${errText}`);
     }
     const data = await response.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
